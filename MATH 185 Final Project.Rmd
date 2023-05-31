@@ -1,0 +1,267 @@
+---
+title: "MATH 185 Final Project: R Notebook"
+output: html_notebook
+---
+Arielle Thibeault
+A13372654
+```{r}
+install.packages("ggplot2")
+install.packages("KernSmooth")
+library(ggplot2)
+library(KernSmooth)
+
+baseball <- read.csv("~/Library/Mobile Documents/com~apple~TextEdit/Documents/baseball.data.txt", sep="")
+summary(baseball)
+```
+Now we begin with Part 1: Rank Sum
+Part (a) asks to investigate the salaries of two divisions to determine whether or not the distributions of the two leagues' salaries are the same. Given that we do not have any information on the distribution of the salary data, we will use the Wilcoxon test under the assumption of normality as N (the sample size) is sufficiently large.
+To be thorough, we will calculate the test statistic as well as the mean and variance of it under the Null Hypothesis: There is no difference between the two divisions salaries.
+
+First we clean the data, then subset it into members of the two leagues to begin the analysis:
+```{r}
+salary.clean <- na.omit(baseball)
+n.ind <- which(salary.clean['league'] == "N")
+a.ind <- which(salary.clean['league'] == "A")
+nleague <- salary.clean[n.ind,]
+aleague <- salary.clean[a.ind,]
+nsalary <- nleague$salary
+asalary <- aleague$salary
+qplot(nsalary, geom= "histogram", main = "Distribution of the N League Players' Salaries", ylab = "Frequency of Players", xlab = "Salary in Thousands") + 
+  geom_histogram(aes(fill = ..count..)) + 
+  scale_fill_gradient("Count", low = "black", high = "seagreen2")
+qplot(asalary, geom= "histogram", main = "Distribution of the A League Players' Salaries", ylab = "Frequency of Players", xlab = "Salary in Thousands") + 
+  geom_histogram(aes(fill = ..count..)) + 
+  scale_fill_gradient("Count", low = "black", high = "turquoise1")
+```
+Wilcoxon Test: Let alpha = 0.5
+Null Hypothesis: There is no difference in salary between the A and the N league. 
+```{r}
+wilcox.test(nsalary, asalary, alternative = "two.sided", exact = TRUE, conf.int = TRUE)
+```
+After getting mixed results, we will apply the Wilcoxon test to a further refined data set to compare the results. In this section, we will remove the "ties" or repeated values in the data and perform the Wilcoxon test for the same Null distribution:
+```{r}
+norepeats <- unique(salary.clean$salary)
+norepeatssalary <- salary.clean[norepeats,]
+nind <- which(norepeatssalary['league'] == "N")
+aind <- which(norepeatssalary['league'] == "A")
+n.league <- norepeatssalary[nind,]
+a.league <- norepeatssalary[aind,]
+nrepeats <- n.league$salary
+arepeats <- a.league$salary
+
+wilcox.test(nsalary, asalary, alternative = "two.sided", exact = TRUE, conf.int = TRUE, conf.level = 0.95)
+```
+Since both the tests resulted in a p-value larger than that of the significance level, we fail to reject the Null hypothesis and conclude that there is not statistically significance in the difference in the two leagues' salary distributions from those sampled. 
+However, we will not include the value of the Wilcoxon test with the test removed because the sample size drops too drastically to be considered (N ~ 150 to N ~ 20). With N roughly 20, the results would be much more biased than our original data so this method of cleaning is not reliable. We will discard it.
+
+Going back to the previous test, the wilcoxon test calculates U from W = U + m(m+1)/2, so we can calculate W by adding the extra term:
+```{r}
+n <- length(nsalary)
+m <- length(asalary)
+W_obs <- 8529 + m*(m+1)/2
+```
+Using another technique, we can manually calculate the test statistic by joining the two leagues' salary data together (with the first n terms being the N leagues' salary data and the last m terms being the A leagues' salary data) and then summing together the ranks for the A league terms.
+```{r}
+combined <- c(nsalary, asalary)
+rank <- rank(combined)
+new <- data.frame(combined, rank)
+w_obs <- sum(new$rank[(n+1):(n+m)])
+```
+Similarly, as discussed in Lecture, under the Null distribution of W, we can calculate the mean and variance of the test statistic as follows:
+```{r}
+expectedW <- (m*(n+m+1))/2
+varianceW <- (m*n*(n+m+1))/12
+```
+All together we get the following results:
+W_obs = 18259 (generated from the Wilcoxon test)
+w_obs = 18437 (manually calculated)
+E(W) = 18348
+Var(W) = 379192
+
+Since the two empirical test statistics are roughly equal to the expected value of the test statistic, we can be confident in the legitimacy of these estimators.
+------------------------------------------
+For Part (b), we will discuss "ties". While running the first Wilcoxon test in Part (a), we encountered an error in calculating the ranks for the salaries of players in both the N and the A leagues: there were many repeated values so there would be fractional ranks and thus an imprecise confidence interval and p-vlaue returned. Since removing the repeated values lead to a much more reduced sample size, it is not realistic to utilize that method to resolve the error. Instead, under the assumption that the Null distribution is roughly normal for the N and A league salaries, one could simulate a distribution based on random replications of the data.
+
+To do so, below is a code for creating a random sampling distribution for the ranks of the A and N salary ranks. After creating a distribution, we calculate an empirical test statistic from the random sampling distribution by sampling ranks without replacements and summing up their ranks. Then, lastly, we calculate the average p-value for all the simulations so that we may compare it with the previously calculate p-values from the Wilcoxon tests.
+Here we choose the simulation size to be 10000.
+```{r}
+simulation_disribution <- function(w_obs, n, m){
+  ranks <- 1:(n + m)
+  w_rand <- numeric(10000)
+  for (i in 1:10000){
+    w_rand[i] <- sum(sample(ranks, m, replace = FALSE))
+  }
+  p.greater <- mean(w_obs < w_rand)
+  p.less <- mean(w_obs >= w_rand)
+  p_value <- 2*min(p.less, p.greater)
+  return(p_value)
+}
+simulation_disribution(w_obs, n, m)
+```
+The p-value calculated from the simulation in the neighborhood of 0.8842. Compared to the p-value from the first Wilcoxon test, 0.8857, these two numbers are close to one another. This is a good indicator of the robustness of the estimator calculated in Part (a). We can reasonably confirm that the p-values calculated are good estimators of the true p-value and hold up under the presence of ties.
+
+------------------------------------------
+For Part (c), we will again run a Wilcoxon test on the two leagues' salary data and compute the estimator for the difference between the two median salaries (we will call delta_hat) via the Lehmann-Hodges method and finally, create a confidence interval for the estimator of the difference between the two leagues' median salaries.
+
+The first portion of this code simply prints out the summary of both leagues' salary data, allowing us to view the min, max, quartiles, and most importantly their medians. This is just for personal reference.
+The second portion runs the Wilcoxon Rank Sum Test on the two vectors, and prints out the test statistic, p-value, confidence interval for -delta, and the estimated difference in location.
+Lastlty, the third portion manulaly calculates the Lehmann-Hodges estimator for the location difference between the two leagues' salaries.
+```{r}
+summary(nsalary)
+summary(asalary)
+
+wilcox.test(nsalary, asalary, alternative = "two.sided", exact = TRUE, conf.int = TRUE, conf.level = 0.95)
+
+differences <- outer(nsalary, asalary, "-")
+delta_hat <- median(differences)
+```
+We can see that the L-H estimator, delta_hat is -5 which coincides with the sample estimator generated from the Wilcoxon test (-4.999974). The confidence interval for -delta is [-80.00006, 69.99998] defined by the Wilcoxon test or alternatively [-69.99998, 80.00006] for positive delta. Since both these contain out L-H estimator, it seems reasonable that our estimator is good and therefore our Wilcoxon tests hold. We can say that the difference in medians of the two leagues' salaries is due to random chance. 
+
+------------------------------------------
+Next we continue to Part 2: Rank Sign Test
+Part (d) suggests that there may be the same median for the walks and runs of the baseball players. We investigate this by performing a Rank Sign test on the difference in medians with the Null Hypothesis: There is no difference between the two medians, and exploring the results, for alpha = 0.5. 
+
+Here we manually calculate the test statistic for the Rank Sum test by calculating the difference bewteen the walks and the runs and ranking the absolute value of their difference. We then determine which values are larger than the expected difference, or 0 in this case, and choose all the difference values that are positive and sum them together.
+```{r}
+median(baseball$runs)
+median(baseball$walks)
+qplot(baseball$runs, geom= "histogram", main = "Distribution of the Players' Runs", ylab = "Frequency", xlab = "Number of Runs") + 
+  geom_histogram(aes(fill = ..count..)) + 
+  scale_fill_gradient("Count", low = "darkslategrey", high = "darkslategray1")
+qplot(baseball$walks, geom= "histogram", main = "Distribution of the Players' Walks", ylab = "Frequency", xlab = "Number of Walks") + 
+  geom_histogram(aes(fill = ..count..)) + 
+  scale_fill_gradient("Count", low = "tomato4", high = "tomato")
+
+df <- data.frame(baseball$runs, baseball$walks)
+df$difference <- baseball$runs - baseball$walks
+df$absdifference <- abs(baseball$runs - baseball$walks)
+df$ranks <- rank(df$absdifference)
+qplot(df$difference, geom= "histogram", main = "Distribution of the Differences between Players' Runs and Walks", ylab = "Frequency", xlab = "Difference") + 
+  geom_histogram(aes(fill = ..count..)) + 
+  scale_fill_gradient("Count", low = "pink4", high = "pink")
+
+ind <- which(df['difference'] > 0)
+testdata <- df$ranks[ind]
+W <- sum(testdata)
+```
+To calculate the confidence intervals, we use the normality approximation of the test statistic under the Null hypothesis as N = 241 is sufficiently large.
+
+For this, we use another method of calculating the Wilcoxon Signed Rank statistic using the wilcox.test function in R and using paired = TRUE to indicate that we are doing the 1-sample signed rank test. This produces the test statistic, p-value, and confidence interval like so:
+```{r}
+wilcox.test(baseball$runs, baseball$walks, paired = TRUE, alternative = "two.sided", exact = TRUE, conf.int = TRUE, conf.level = 0.95) 
+```
+From the Signed Ranks test, we get another value for our test statistic, 41357, which is close to the test statistic value we manually computed at 43526. The confidence interval computed from the test is [9.999991, 13.999954] which indicates that the true difference between the medians is located in about [10, 14]. The point estimate given for the median of the difference in samples is given to be 11.99992 which would fall within the 95% confidence interval. This in combination with the p-value < 0.0001 gives us the result that we should reject the Null hypothesis and conclude that there is a statistically significant difference in the medians for the players' runs and walks. 
+
+------------------------------------------
+Finally, we conclude with Part 3: Smoothing
+In Part(e), we will explore the relationship between the log return of the Salary data and other variables that may indicate some sort of regressive relationship:
+```{r}
+salary.clean$logsalary <- log(salary.clean$salary)
+
+a <- salary.clean$logsalary
+b <- salary.clean$homeruns_career
+d <- data.frame(a, b)
+d$pc <- predict(prcomp(~a+b, d))[,1]
+ggplot(d, aes(a, b, color = pc)) +
+  geom_point(shape = 16, size = 5, show.legend = FALSE, alpha = .4) +
+  theme_minimal() +
+  scale_color_gradient(low = "#0091ff", high = "#f0650e") +
+  ggtitle("Relationship between the Log Return of Player's Income and the Number of Homeruns Hit in their Career") + xlab("Player's Log Salary") + ylab("Player's Log Salary")
+
+ggplot(salary.clean, aes(x = salary.clean$division, y = salary.clean$logsalary)) +
+        geom_boxplot(alpha = 0.5) +
+        scale_y_continuous(name = "Player's Log Salary",
+                           breaks = seq(1, 8, 1)) +
+        scale_x_discrete(name = "Divisions") +
+        ggtitle("Relationship between the Log Return of Player's Income and the Player's Division")
+```
+From these simple plots, it is clear to see that there is some sort of relationship between the log transformed salary data and both of the possible response variables, homeruns_career and division. The first plot indicates that there is a possible correlation between the log of the player's salary and the number of homeruns in the player's career indicating that more homeruns in a player's career might indicate a higher log salary. Similarly, the boxplot might indicate that players in the Division E earn more than players in Division W.
+A further analysis is needed to confirm these trends.
+
+------------------------------------------
+For Part (f), we will conduct a regression to determine if a player's log salary can be predicted by the number of homeruns in his/ her career.
+```{r}
+linearmodel<- lm(salary.clean$logsalary ~ salary.clean$homeruns_career)
+summary(linearmodel)
+plot(salary.clean$homeruns_career, salary.clean$logsalary, main = "The Regressive Relationship between the Log Salary \nof a Player and their Homerun Career", xlab = "The Number of Homeruns in the Player's Career", ylab = "Player's Log Salary")
+abline(linearmodel, col = "blue")
+```
+From the results of the linear regression, we can see that the log salary and the number of homeruns are related, with the intercept being roughly 5.5347803 and the coefficient for the explanatory variable 0.0056679. This indicates that there is a slight predictive capacity of the number of homeruns to predict a player's log salary.
+As with most data, we can see from the scatterplot that there appears to be a few outliers in our data. I believe that these outliers are skewing our regression line to have a lesser slope than it would be without them. Whereas the plot with outliers contains the regression line intersecting the graph at a roughly 30 degree angle, I would predict that when the outliers are removed, the line would fit the data better at maybe a 50 degree angle. 
+
+------------------------------------------
+For Part (g), we will investigate the application of smoother filters on our data with various smoothing parameters. 
+We create 6 different linear smoothers of our Homeruns vs Log Salary data with increasing bandwidth size and plot them on a central graph for comparison.
+```{r}
+plot(salary.clean$homeruns_career, salary.clean$logsalary, main = "The Regressive Relationship between the Log Salary of a Player and their Homerun Career", xlab = "The Number of Homeruns in the Player's Career", ylab = "Player's Log Salary")
+smoother1 <- ksmooth(salary.clean$homeruns_career, salary.clean$logsalary, kernel='normal', bandwidth=10)
+lines(smoother1, col = "pink",lwd = 2)
+smoother2 <- ksmooth(salary.clean$homeruns_career, salary.clean$logsalary, kernel='normal', bandwidth=25) 
+lines(smoother2, col = "orange",lwd = 2)
+smoother3 <- ksmooth(salary.clean$homeruns_career, salary.clean$logsalary, kernel='normal', bandwidth=50)
+lines(smoother3, col = "yellow", lwd = 2)
+smoother4 <- ksmooth(salary.clean$homeruns_career, salary.clean$logsalary, kernel='normal', bandwidth=100)
+lines(smoother4, col = "green", lwd = 2)
+smoother5 <- ksmooth(salary.clean$homeruns_career, salary.clean$logsalary, kernel='normal', bandwidth=200)
+lines(smoother5, col = "blue", lwd = 2)
+smoother6 <- ksmooth(salary.clean$homeruns_career, salary.clean$logsalary, kernel='normal', bandwidth=300)
+lines(smoother6, col = "purple", lwd = 2)
+```
+From the plot above, we can see varying levels of smoothing of the Homeruns vs Log Salary plot. We can see some of the smoothers with lower bandwidth approximately interpolate (or fit more closely) the data than some other smoothers with larger bandwidth that seem to indicate a linear trend. From this, it is clear that some of our smoothers have overfit the data while some have underfit. Smoothers with bandwidth in the mid range of values like h = 25, 50, 100 seem to be better smoothers as they oppress some peaks and troughs but do not completely remove the trend of the data.
+
+------------------------------------------
+Lastly, in Part (h), we use the Leave-one-out cross-validation method to estimate the bandwidth for a local polynomial fit of degree 1 and calculate the smoothing matrix S.
+```{r}
+lpreg<-function(x,y,x0,deg,h)
+{ 
+  n <- length(x)  
+  if(x0<min(x)-h | x0>max(x)+h){
+     lpfit <- 0
+  } else{
+     X <- matrix(1, nr=n, nc=1)
+    for(j in 1:1){
+     X <- cbind(X, (x-x0)^j/factorial(j))
+    }                              
+     W <- diag(dnorm((x-x0)/h))    
+     coef <- solve(t(X)%*%W%*%X)%*%t(X)%*%W%*%y 
+     lpfit <- coef[1]
+  }
+  return(lpfit)
+}
+```
+
+```{r}
+x <- salary.clean$homeruns_career
+y <- salary.clean$logsalary
+
+band_grid <- seq(1,100,0.5)
+L <- length(band_grid)
+get_llmse <- function(x,y,h)
+{
+  mse <- 0
+  n <- length(x)
+  for(i in 1:n){
+    xi <- x[-i]
+    yi <- y[-i]  
+    fiti <- lpreg(xi,yi,x[i],1,h)
+    mse <- mse + (fiti-y[i])^2
+  }
+  return(mse/n)
+}
+llmse <- numeric(L)
+for (k in 1:L){
+  llmse[k] = get_llmse(x,y,band_grid[k])
+}
+plot(llmse,type='l',col='red', lwd=2)
+ll_h <- band_grid[which(llmse == min(llmse))]
+
+h1 <- dpill(x,y)
+ll_fit <- numeric(n)
+for (i in 1:n){
+  ll_fit[i] <- lpreg(x,y,x[i],1,ll_h)
+}
+plot(x,y)
+lines(x,ll_fit,col='green',lwd=2)
+nw_fit <- ksmooth(x,y,kernel='normal',bandwidth=2*h1)
+lines(nw_fit,col='red',lwd=2)
+```
